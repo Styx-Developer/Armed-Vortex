@@ -3,6 +3,17 @@
 -- StarterGui --> Make a folder and name it "Jupiter" --> This script
 -- Replicated Storage --> Make a folder and name it "Remotes" --> Create a remote in that folder called "NotificationEvent"
 
+--[[
+    Project: Armed-Vortex;
+    Developers: StyxDeveloper;
+    Contributors: ChatGPT;
+    Description: This GUI is entirely hand coded;
+    Version: v1.0.1;
+    Update Date: 10/4/25;
+    Update Log: Fixed the issue where the GUI would shut too quick!
+]]
+
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage");
 local player = game:GetService("Players").LocalPlayer;
 
@@ -71,7 +82,7 @@ end;
 
 ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("NotificationEvent").OnClientEvent:Connect(function(message)
 	if player.PlayerGui:FindFirstChild("WarningGUI") then
-		player.PlayerGui.WarningGUI:Destroy();
+		return;
 	end;
 	if not screenGui then
 		createGUIElements();
