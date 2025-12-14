@@ -1,8 +1,10 @@
 -- PLACE THIS INSIDE REPLICATED STORAGE TO ENSURE 100% WORKAGE!
--- Half of this is made to be edited for others, not just us (Exfamous, StyxDeveloper)
+-- Set your webhook below!
+
+-- Half of this is made to be edited for others, not just us (StyxDeveloper, Jermiah)
 --[[
     Project: Armed-Vortex;
-    Developers: StyxDeveloper, ExFamous;
+    Developers: StyxDeveloper, Jeremiah;
     Contributors: nil;
     Description: InfoHandlerModule;
     Version: v1.1.3;
@@ -10,261 +12,180 @@
     	Added support for bad animations;
 ]]
 
--- {{ MODULE TABLE }} --
-local aVM = {} -- Armed Vortex
+local aVM = {};
 
--- {{ CONFIG }} --
-aVM.avCon = { -- Armed-Vortex Configuration
-	-- DONT MESS WITH THIS UNLESS YOU KNOW WHAT YOU ARE DOING!
-	-- THIS IS USED TO FIND BUGS AND FIX THEM!
-	DEBUGINFO = { -- Debugging and Error Pentesting
-		dM = false; -- DEBUG MODE -- CHANGE IF ISSUES PRESENTED IN THIS FILE!
-		dOO = false; -- Detection Overwrite -- CHANGE IF ISSUES PRESENTED IN THIS FILE! -- USED TO DISABLE THIS FILE!
-	};
+local Players = game:GetService("Players");
+local ReplicatedStorage = game:GetService("ReplicatedStorage");
+local ServerScriptService = game:GetService("ServerScriptService");
+local HttpService = game:GetService("HttpService");
 
-	MECHANICS = { -- Anti-Cheats logic - THIS FILE HANDLES ALL LOGIC
-		-- CHANGE FOR YOUR BENEFIT
-		STRIKES = {
-			sT = 3; -- Strike Threshold -- CHANGE IF YOU WANT TO USE THE STRIKE SYSTEM!
-			bS = { -- Ban System -- CHANGE TO USE THE BAN SYSTEM -- THESE ARE IN DAYS
-				firstBan = 3; -- FEEL FREE TO CHANGE
-				secondBan = 7; -- FEEL FREE TO CHANGE
-				thirdBan = -1; -- DO NOT CHANGE
-			};
-		};
-		SYSTEM = {
-			kS = true; -- Kick System Enabled -- CHANGE IF YOU WANT TO USE THE KICK SYSTEM!
-			bS = false; -- Ban System Enabled -- CHANGE IF YOU WANT TO USE THE BAN SYSTEM!
-			wH = ""; -- WebHook for Armed Vortex notifications -- Change for your WebHook
-		};    
+aVM.avCon = {
+	DEBUGINFO = { dM = false; dOO = false; };
+	MECHANICS = { STRIKES = { sT = 3; bS = { firstBan = 3; secondBan = 7; thirdBan = -1; }; }; SYSTEM = { kS = true; bS = false; wH = ""; }; };
+	OWNERCONFIGS = {
+		["Jupiter_Development"] = { LEVEL = 1; ADMIN = true; };
 	};
-	OWNERCONFIGS = { -- User Configurations
-        --[[
-            FORMAT:
-            ["USERNAME"] = {
-                ["LEVEL"] = nil; -- [1 = Owner] - [2 = Admin] - [3 = Mod] -- 1-2 AntiCheat is disabled. 
-                ["ADMIN"] = true; -- [true = Chat + UI Commands] - [false = No Admin] -- Can be nil results in false, automatically disables AntiCheat if true
-           };
-        --]]
-
-		-- For test purposes
-		--[[
-		["Jupiter_Development"] = {
-			["LEVEL"] = 1;
-			["ADMIN"] = true;
-		};		
-		]]
-
-		["diva49ers"] = {
-			["LEVEL"] = 1;
-			["ADMIN"] = true;
-		};
-	};
-	PLAYERS = {
-		-- INFO THAT WILL BE PROVIDED USERID - STRIKES - SERVERBAN
-	};
+	PLAYERS = {};
 };
 
-aVM.ssAC = {
-	pD = { -- Everything the server-sided AntiCheat will detect
-		wS = {
-			ENABLED = true;
-			SETTINGS = { -- Do not modify if you dont know what you're doing
-				checkInterval = 0.6; -- Seconds
-				toleranceDelta = 16 + 1.4; -- 22.4 studs, Roblox's docs state how this works
-			};
-		};
-		aB = { -- AimBots
-			ENABLED = true;
-			SETTINGS = {
-				aimSnap = 0.8; -- Threshold for snapping to target (0 to 1 scale)
-				checkInterval = 0.3; -- Interval in seconds between aim check
-			};
-		};
-		aA = { -- Account age restrictions to prevent underage players
-			ENABLED = true;
-			SETTINGS = {
-				minimumAge = 10; -- Minimum account age in days
-			};
-		};
-		jP = {
-			ENABLED = true;
-			SETTINGS = {
-				expectedJumpPower = 9 + 1.4;	
-			};
-		};
-		BAD_ANIMATION_IDS = {
-			["rbxassetid://72042024"] = true;
-			["rbxassetid://698251653"] = true;
-			["rbxassetid://148840371"] = true;
-			["rbxassetid://5918726674"] = true;
-		};
-	};
-};
+local webhookUrl; pcall(function() webhookUrl = require(ServerScriptService:WaitForChild("LOL")); end); -- WEBHOOK!
 
--- Function to send data to the webhook
-function aVM.sendToWebhook(message)
-	local HttpService = game:GetService("HttpService")
+aVM.Logs = {};
+aVM.Settings = { PrintToOutput = false; SendWebhook = true; };
 
-	local data = 
-		{
-			["content"] = message
-
-		}
-
-	local jsonData = HttpService:JSONEncode(data)
-
-	local success, response = pcall(function()
-		return HttpService:PostAsync(aVM.avCon.MECHANICS.SYSTEM.wH, jsonData, Enum.HttpContentType.ApplicationJson)
-	end)
-end
-
--- Quick Check
-if aVM.avCon.DEBUGINFO.dOO then
-	if aVM.avCon.DEBUGINFO.dM then
-		print("You have disabled the AntiCheat! | INFOHOLDERMODULE!");
-	end;
-	aVM.sendToWebhook("Anti-Cheat is disabled!");
-	return "Disabled";
+local function getTimeStr()
+	local t = os.date("*t");
+	return string.format("%02d:%02d:%02d", t.hour, t.min, t.sec);
 end;
 
--- {{ FUNCTIONS }} --
-function aVM.checkLevel(user: Player?)
-	local l = aVM.avCon.OWNERCONFIGS[user.Name] and aVM.avCon.OWNERCONFIGS[user.Name]["LEVEL"]
-	local ad = aVM.avCon.OWNERCONFIGS[user.Name] and aVM.avCon.OWNERCONFIGS[user.Name]["ADMIN"]
+function aVM.sendDiscordEmbed(player, logType, details)
+	if not webhookUrl or webhookUrl == "" then return end;
+	local colors = { Info = 5814783; Warn = 16744192; Error = 16711680; Success = 65280; };
+	local embedColor = colors[logType] or 5814783;
 
-	local oS = nil
+	local fields = {
+		{ name = "👤 Player"; value = string.format("**%s** (@%s)", player.Name, player.DisplayName); inline = true; };
+		{ name = "🆔 User ID"; value = tostring(player.UserId); inline = true; };
+		{ name = "📅 Account Age"; value = string.format("%d days", player.AccountAge); inline = true; };
+	};
 
-	if l == 1 then
-		oS = "Owner"
-		aVM.sendToWebhook("Owner detected "..user.Name)
-	elseif l == 2 then
-		oS = "Admin"
-	elseif l == 3 then
-		oS = "Mod"
-		aVM.sendToWebhook("Mod detected")
+	if details then
+		if details.speed then table.insert(fields, { name = "⚡ Speed Detected"; value = string.format("%.1f studs/s", details.speed); inline = true; }); end;
+		if details.height then table.insert(fields, { name = "📈 Jump Height"; value = string.format("%.1f studs", details.height); inline = true; }); end;
+		if details.animationId then table.insert(fields, { name = "🎬 Animation ID"; value = details.animationId; inline = false; }); end;
+		if details.position then
+			table.insert(fields, { name = "📍 Position"; value = string.format("X: %.1f, Y: %.1f, Z: %.1f", details.position.X, details.position.Y, details.position.Z); inline = false; });
+		end;
+	end;
+	local msgText = tostring(details and details.msg or "No message provided")
+	local description
+	if logType == "Info" then
+		description = msgText
+	elseif logType == "ADD MONEY" then
+		description = string.format("**Admin Command Executed:** %s\n```%s```", logType, msgText)
 	else
-		oS = "false"
+		description = string.format("**Violation Detected: %s**\n```%s```", logType, msgText)
 	end
+	local embed = {
+		title = (logType == "Info") and "ℹ️ Info" or "🚨 Armed-Vortex AntiCheat";
+		description = description;
+		color = embedColor;
+		fields = fields;
+		timestamp = DateTime.now():ToIsoDate();
+		footer = { text = "Jupiter Development • Armed-Vortex v1.3.0"; };
+	};
+	local payload = { embeds = { embed }; };
+	pcall(function()
+		HttpService:RequestAsync({
+			Url = webhookUrl;
+			Method = "POST";
+			Headers = { ["Content-Type"] = "application/json"; };
+			Body = HttpService:JSONEncode(payload);
+		});
+	end);
+end;
 
-	ad = ad ~= nil and tostring(ad) or "false"
+function aVM.Log(level, msg, player, details)
+	level = (level or "INFO"):upper();
+	local icons = { INFO = "🟠"; WARN = "🟡"; ERROR = "🔴"; SUCCESS = "🟢"; DEBUG = "⚪"; };
+	local icon = icons[level] or "⚪";
+	local formatted = string.format("[%s] %s {%s} %s", icon, level, getTimeStr(), tostring(msg));
+	table.insert(aVM.Logs, {
+		time = os.time();
+		level = level;
+		icon = icon;
+		message = tostring(msg);
+		formatted = formatted;
+	});
+	task.defer(function()
+		if aVM.Settings.SendWebhook and player then
+			if level == "WARN" or level == "ERROR" then
+				aVM.sendDiscordEmbed(player, level, details or { msg = msg });
+			end
+		end
+	end);
+	if aVM.Settings.PrintToOutput then
+		pcall(function() print(formatted); end);
+	end
+end;
 
-	return oS, ad
-end
+function aVM.GetLogs() return aVM.Logs; end;
+function aVM.ClearLogs() table.clear(aVM.Logs); aVM.Log("INFO", "Log memory cleared."); end;
 
 function aVM.sendNotification(message: string?, who: string?)
-	if not message or message == "" then
-		return;
-	end;
-	local notificationEvent = game:GetService("ReplicatedStorage").Remotes:WaitForChild("NotificationEvent");
-	if not notificationEvent then
-		repeat task.wait() until notificationEvent;
-		return;
-	end;
+	if not message or message == "" then return end
+	local notificationEvent = game:GetService("ReplicatedStorage").Remotes:WaitForChild("NotificationEvent")
+	if not notificationEvent then repeat task.wait() until notificationEvent; return end
+
 	if who == nil or who == "all" then
-		notificationEvent:FireAllClients(nil, message);
+		notificationEvent:FireAllClients(nil, message)
 	else
-		notificationEvent:FireClient(game:GetService("Players")[who], message);
+		notificationEvent:FireClient(game:GetService("Players")[who], message)
+	end
+end
+
+function aVM.checkLevel(user)
+	if not user then return "false", false; end;
+	local cfg = aVM.avCon.OWNERCONFIGS[user.Name];
+	local lvl = cfg and cfg.LEVEL;
+	local admin = cfg and cfg.ADMIN or false;
+	local status = "false";
+	if lvl == 1 then status = "Owner"; aVM.Log("INFO", "Owner detected: "..user.Name, user);
+	elseif lvl == 2 then status = "Admin";
+	elseif lvl == 3 then status = "Mod"; aVM.Log("INFO", "Mod detected: "..user.Name, user);
 	end;
+	return status, admin;
+end;
+
+function aVM.addStrike(userId, reason)
+	local P = aVM.avCon.PLAYERS;
+	if not userId then return; end;
+	pcall(function()
+		if P[userId] and P[userId].TEMPPASS == false then
+			P[userId].STRIKES = (P[userId].STRIKES or 0) + 1;
+			local pl = Players:GetPlayerByUserId(userId);
+			if pl then aVM.sendNotification("Exploit Detected, stop exploiting!", pl.Name); end;
+			aVM.Log("WARN", ("Strike added to %s (reason: %s)"):format(userId, reason or "unspecified"), pl);
+		end;
+	end);
 end;
 
 function aVM.Initialize()
-	local players = game:GetService("Players");
+	Players.PlayerAdded:Connect(function(user)
+		if not user then return; end;
+		aVM.avCon.PLAYERS[user.UserId] = aVM.avCon.PLAYERS[user.UserId] or { STRIKES = 0; SERVERBAN = false; TEMPPASS = false; };
 
-	players.PlayerAdded:Connect(function(user)
-		local suc, err = pcall(function()
-			task.spawn(function()
-				if not aVM.avCon.PLAYERS[user.UserId] then
-					aVM.avCon.PLAYERS[user.UserId] = {
-						["STRIKES"] = 0;
-						["SERVERBAN"] = false;
-						["TEMPPASS"] = false;
-					};
+		task.spawn(function()
+			while Players:FindFirstChild(user.Name) and task.wait(1) do
+				local d = aVM.avCon.PLAYERS[user.UserId]; if not d then break; end;
+				if d.STRIKES >= (aVM.avCon.MECHANICS.STRIKES.sT or 3) and aVM.avCon.MECHANICS.SYSTEM.kS then
+					pcall(function() user:Kick("You have been kicked by the Anti-Cheat."); end);
+					aVM.Log("WARN", user.Name.." kicked by anti-cheat (strikes: "..d.STRIKES..")", user);
 				end;
-				while players:FindFirstChild(user.Name) and task.wait(1) do
-					if aVM.avCon.PLAYERS[user.UserId].STRIKES >= aVM.avCon.MECHANICS.STRIKES.sT then
-						if aVM.avCon.MECHANICS.SYSTEM.kS then
-							user:Kick("You have been kicked by the Anti-Cheat.");
-							aVM.sendToWebhook(user.Name .. " has just been kicked, exploit detected.")
-							if aVM.avCon.DEBUGINFO.dM then
-								print(user.Name .. " has just been kicked!");
-							end;
-							task.wait(2)
-						end;
-					end;
-					if aVM.avCon.PLAYERS[user.UserId].SERVERBAN == true then
-						user:Kick("You have been server banned!");
-					end;
-					if aVM.avCon.MECHANICS.SYSTEM.bS then
-						local banHistory = players:GetBanHistoryAsync(user.UserId);
-						local banDuration;
-						for _,v in pairs(banHistory) do
-							banDuration = v.Duration or false;
-							break
-						end;
-						if banDuration then
-							banDuration = (banDuration/60)/60/24;
-							for i,v in pairs(aVM.avCon.MECHANICS.STRIKES.bS) do
-								if v == banDuration then
-									banDuration = i;
-									break;
-								end;
-							end;
-							if banDuration == "firstBan" then
-								banDuration = aVM.avCon.MECHANICS.STRIKES.bS.secondBan;
-							elseif banDuration == "secondBan" then
-								banDuration = aVM.avCon.MECHANICS.STRIKES.bS.thirdBan;
-							elseif banDuration == false then
-								banDuration = aVM.avCon.MECHANICS.STRIKES.bS.firstBan;
-							end;
-						end;
-
-						local config = {
-							UserIds = {user.UserId};
-							Duration = banDuration * 24 * 60 * 60;
-							DisplayReason = "AVAC: " .. user.Name .. " is banned for exploiting!";
-							PrivateReason = "Note: This ban was from the Anti-Cheat, they were detected for cheating.";
-						};
-
-						players:BanAsync(config);
-						aVM.sendToWebhook(user.Name .. " has just been banned for " .. config.Duration .. " days, " .. config.PrivateReason);
-					end;
-				end;
-			end);
-			task.spawn(function()
-				local oS, aD = aVM.checkLevel(user);
-				if aVM.avCon.DEBUGINFO.dM then 
-					print(oS, aD);
-				end;
-				if oS ~= "false" and aD == "true" then
-					require(game:WaitForChild("ReplicatedStorage"):WaitForChild("AdminCommandsModule")).init(user);
-				end;
-			end);
-		end);
-		if not suc and aVM.avCon.DEBUGINFO.dM then
-			print("AVAC: Error while initialize! \n Error: " .. err);
-		end;
-	end);
-	if aVM.avCon.DEBUGINFO.dM then
-		print("INFOHOLDERMODULE: Initialized!");
-	end;
-end;
-
-
-function aVM.addStrike(playerUserId: number?, reason: string)
-	local PLAYERS = aVM.avCon.PLAYERS;
-	local suc, err = pcall(function()
-		if PLAYERS[playerUserId] and PLAYERS[playerUserId].TEMPPASS == false then
-			PLAYERS[playerUserId].STRIKES = PLAYERS[playerUserId].STRIKES + 1;
-			local player = game:GetService("Players"):GetPlayerByUserId(playerUserId);
-			if player and aVM.avCon.DEBUGINFO.dM then
-				aVM.sendNotification("Exploit Detected, stop exploiting!", player.Name);
 			end;
-		end;
+		end);
+
+		task.spawn(function()
+			local role, isAdmin = aVM.checkLevel(user);
+			if (role == "Owner" or role == "Admin") and isAdmin then
+				local mod = ReplicatedStorage:FindFirstChild("AdminCommandsModule");
+				if mod then pcall(function() require(mod).init(user); aVM.Log("SUCCESS", "Admin commands initialized for "..user.Name, user); end);
+				else aVM.Log("WARN", "AdminCommandsModule not found in ReplicatedStorage", user); end;
+			end;
+		end);
+
+		aVM.sendNotification("The game is protected by Jupiter Development!", user.Name);
+		aVM.Log("INFO", "PlayerAdded handled for "..user.Name, user);
 	end);
-	if not suc and aVM.avCon.DEBUGINFO.dM then
-		print("[Error]: " .. err);
-	end;
+
+	Players.PlayerRemoving:Connect(function(p)
+		aVM.avCon.PLAYERS[p.UserId] = nil;
+		aVM.Log("INFO", "Player removed: "..tostring(p.Name));
+	end);
+
+	aVM.Log("SUCCESS", "InfoHolderModule initialized and ready.");
 end;
+
+if aVM.avCon.DEBUGINFO.dOO then aVM.Log("WARN", "Anti-Cheat disabled via DEBUGINFO.dOO"); return aVM; end;
 
 return aVM;
