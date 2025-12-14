@@ -2,160 +2,222 @@
 -- Fully Tested
 -- NOT EDITABLE (unless you know what your doing)
 --[[
-    Project: Armed-Vortex;
-    Developers: StyxDeveloper;
-    Contributors: nil;
-    Description: Serversided anticheat;
-    Version: v1.1.1;
-    Update Date: 5/13/2025;
-	Monitors animations played and checks against a blacklisted one.
+	Project: Armed-Vortex;
+	Developers: StyxDeveloper;
+	Contributors: nil;
+	Description: Serversided anticheat;
+	Version: v1.1.5;
+	Update Date: 10/31/2025;
+	Notes:
+
 ]]
 
--- Requiring the module
-local iHM = require(game:WaitForChild("ReplicatedStorage"):WaitForChild("InfoHolderModule"));
+local iHM = require(game:WaitForChild("ReplicatedStorage"):WaitForChild("InfoHolderModule"))
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
 
--- Quick check if the Anti-Cheat is being disabled
 if iHM.avCon.DEBUGINFO.dOO then
-	print("AntiCheat Disabled!");
-	return;
-end;
+	print("AntiCheat Disabled!")
+	return
+end
 
--- Initialize the module's function
-iHM.Initialize();
+iHM.Initialize()
 
-local previousAimData = {};
+local vehicleSystem = {
+	vehicleSpeed = {},
+	playerVehicleState = {},
+	DEFAULT_MAX_SPEED = 160,
+	SPEED_TOLERANCE = 10,
+	SPEED_INTERVAL = 0.2,
+	SCALING = (10/12) * (60/88)
+}
 
--- Check if Debug Mode is enabled
-if iHM.avCon.DEBUGINFO.dM then
-	print("ServerSidedAntiCheat Connection... Successful!");
-end;
+BAD_ANIMATION_IDS = {
+	["rbxassetid://72042024"] = true;
+	["rbxassetid://698251653"] = true;
+	["rbxassetid://148840371"] = true;
+	["rbxassetid://5918726674"] = true;
+}
 
-local function detectSpeedHacks(player: Player?, character: Model?)
-	local lastPosition = character.HumanoidRootPart.Position;
+local function unifiedStrike(player, reason, data)
+	local userId = player.UserId
+	local msg = ("Strike added to %s (reason: %s)"):format(userId, reason or "unspecified")
+	iHM.addStrike(userId, reason)
+	iHM.Log("INFO", msg, player, data or {})
+end
 
-	while player.Parent and iHM.ssAC.pD.wS.ENABLED and task.wait(iHM.ssAC.pD.wS.SETTINGS.checkInterval) do
-		local newPosition = character.HumanoidRootPart.Position;
-		local horizontalDistanceMoved = math.sqrt((lastPosition.X - newPosition.X)^2 + (lastPosition.Z - newPosition.Z)^2);
-
-		if horizontalDistanceMoved > iHM.ssAC.pD.wS.SETTINGS.toleranceDelta then
-			iHM.addStrike(player.UserId);
-			if iHM.avCon.DEBUGINFO.dM then
-				print(player.Name .. " is cheating -- Speed Hack Bypass Detected (" .. horizontalDistanceMoved .. " studs)");
-				iHM.sendToWebhook(player.Name .. " is cheating -- Speed Hack Bypass Detected (" .. horizontalDistanceMoved .. " studs)");
-			end;
-			task.wait(2);
-		end;
-		lastPosition = newPosition;
-	end;
-end;
-
-local function detectJumpHacks(player: Player?, character: Model?)
-	if not character then return; end;
-	local humanoid = character:FindFirstChildWhichIsA("Humanoid");
-	local rootPart = character:FindFirstChild("HumanoidRootPart");
-	if not humanoid or not rootPart then return; end;
-
-	local lastY = rootPart.Position.Y
-	while player.Parent and iHM.ssAC.pD.jP.ENABLED do
-		task.wait(0.5);
-		local heightDiff = rootPart.Position.Y - lastY;
-		if heightDiff > iHM.ssAC.pD.jP.SETTINGS.expectedJumpPower then
-			iHM.addStrike(player.UserId);
-			if iHM.avCon.DEBUGINFO.dM then
-				print(player.Name .. " is cheating -- Jump Power Bypass Detected (" .. heightDiff .. " studs)");
-				iHM.sendToWebhook(player.Name .. " is cheating -- Jump Power Bypass Detected (" .. heightDiff .. " studs)");
-			end;
-			task.wait(2);
-		end;
-		lastY = rootPart.Position.Y;
-	end;
-end;
-
-
-local function detectAimBot(player: Player?, character: Model?)
-	while player.Parent and iHM.ssAC.pD.aB.ENABLED do
-		local head = character:FindFirstChild("Head") or nil;
-		if head then
-			local aimVector = head.CFrame.LookVector;
-			local prevData = previousAimData[player];
-			if not prevData then
-				prevData = {aimVector = aimVector, timestamp = tick()};
-				previousAimData[player] = prevData;
+local function monitorVehicle(player, model)
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+	local running = true
+	task.spawn(function()
+		while running and humanoid and humanoid.SeatPart and humanoid.SeatPart:IsDescendantOf(model) do
+			task.wait(0.5)
+		end
+		if running then
+			local state = vehicleSystem.playerVehicleState[player]
+			if state then
+				state.inVehicle = false
+				state.model = nil
+				state.lastExit = os.clock()
 			end
-			local timeDelta = tick() - prevData.timestamp;
-			if (prevData.aimVector - aimVector).magnitude > iHM.ssAC.pD.aB.SETTINGS.aimSnap and timeDelta < iHM.ssAC.pD.aB.SETTINGS.checkInterval then
-				for _, otherPlayer in pairs(game:GetService("Players"):GetPlayers()) do
-					if otherPlayer ~= player and otherPlayer.Character and otherPlayer.Character:FindFirstChild("Head") then
-						local otherHead = otherPlayer.Character.Head;
-						local directionToOther = (otherHead.Position - head.Position).unit;
-						if aimVector:Dot(directionToOther) > 0.99 then -- Needs to be adjusted
-							iHM.addStrike(player.UserId);
-							if iHM.avCon.DEBUGINFO.dM then
-								print(player.Name .. " is cheating -- Aimbot Detected");
-								iHM.sendToWebhook(player.Name .. " is cheating Aimbot Detected");
-							end;
-							break;
-						end;
-					end;
-				end;
-			end;
-			previousAimData[player] = {aimVector = aimVector, timestamp = tick()};
+		end
+	end)
+	return function()
+		running = false
+	end
+end
+
+local function handleSeated(player, active)
+	local character = player.Character
+	if not character then return end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+	local state = vehicleSystem.playerVehicleState[player] or {}
+	vehicleSystem.playerVehicleState[player] = state
+
+	if active then
+		local seat = humanoid.SeatPart
+		if seat then
+			local model = seat:FindFirstAncestorOfClass("Model")
+			local isVehicle = model and (model:GetAttribute("IsVehicle") == true or model:FindFirstChildWhichIsA("VehicleSeat", true))
+			local isDriver = seat:IsA("VehicleSeat") and isVehicle
+			local isPassenger = seat:IsA("Seat") and isVehicle
+
+			if isDriver then
+				state.inVehicle = true
+				state.model = model
+				state.lastExit = nil
+				if not state.cancel then
+					state.cancel = monitorVehicle(player, model)
+				end
+			elseif isPassenger then
+				state.inVehicle = true
+				state.model = model
+				state.lastExit = nil
+			end
+		end
+	else
+		if state.cancel then
+			state.cancel()
+			state.cancel = nil
+		end
+		state.inVehicle = false
+		state.model = nil
+		state.lastExit = os.clock()
+	end
+end
+
+local function detectSpeedHacks(player: Player, character: Model)
+	local root = character:WaitForChild("HumanoidRootPart");
+	local hum = character:WaitForChild("Humanoid");
+
+	local lastPos = root.Position;
+	local lastTime = os.clock();
+	local lastVehicleExit = 0;
+
+	local MAX = 35;           -- studs/sec
+	local INTERVAL = 1;       -- time
+
+	while player.Parent do
+		task.wait(INTERVAL);
+
+		local vehicle = vehicleSystem.playerVehicleState[player];
+		if vehicle and vehicle.inVehicle then
+			lastPos = root.Position;
+			lastTime = os.clock();
+			lastVehicleExit = os.clock();
+			continue;
 		end;
-		task.wait();
+
+		if os.clock() - lastVehicleExit < 3 or hum.Sit then
+			lastPos = root.Position;
+			lastTime = os.clock();
+			continue;
+		end;
+
+		local now = os.clock();
+		local dt = now - lastTime;
+		if dt <= 0 or dt > 2 then
+			lastPos = root.Position;
+			lastTime = now;
+			continue;
+		end;
+
+		local speed = ((root.Position.X - lastPos.X)^2 + (root.Position.Z - lastPos.Z)^2)^0.5 / dt;
+
+		if speed > MAX then
+			unifiedStrike(player, ("Speed Hack Detected (%.1f / %.1f)"):format(speed, MAX), {
+				speed = speed;
+				maxSpeed = MAX;
+				position = root.Position;
+			});
+			task.wait(5);
+		end;
+
+		lastPos = root.Position;
+		lastTime = now;
 	end;
 end;
 
-local function agePrevention(player: Player?)
-	if iHM.ssAC.pD.aA.ENABLED and player.AccountAge < iHM.ssAC.pD.aA.SETTINGS.minimumAge then
-		if iHM.avCon.DEBUGINFO.dM then
-			print(player.Name .. " or " .. player.DisplayName .. " has just been kicked due to account not meeting age");
-			iHM.sendToWebhook(player.Name .. " alt has been detected, account is " .. player.AccountAge .. " days old.");
+local function detectJumpHacks(player: Player, character: Model)
+	local hum = character:WaitForChild("Humanoid");
+	local root = character:WaitForChild("HumanoidRootPart");
+	local lastY = root.Position.Y;
+	local lastTime = os.clock();
+	local lastVehicleExit = 0;
+	local MAX = 19;
+	local INTERVAL = 0.3;
+
+	while player.Parent do
+		task.wait(INTERVAL);
+		if not root.Parent then break end;
+		local vehicle = vehicleSystem.playerVehicleState[player];
+		if vehicle and vehicle.inVehicle or hum.Sit then
+			lastY = root.Position.Y;
+			lastTime = os.clock();
+			continue;
 		end;
-		player:Kick("Your account is underaged.");
+
+		local now = os.clock();
+		local dt = now - lastTime;
+
+		if dt <= 0 or dt > 1.2 then
+			lastY = root.Position.Y;
+			lastTime = now;
+			continue;
+		end;
+
+		local currentY = root.Position.Y;
+		local diff = currentY - lastY;
+		if diff > MAX then
+			unifiedStrike(
+				player,
+				("Jump Power Bypass Detected (%.1f / %.1f)"):format(diff, MAX),
+				{
+					height = diff;
+					maxHeight = MAX;
+					position = root.Position;
+				}
+			);
+			task.wait(3);
+		end;
+		lastY = currentY;
+		lastTime = now;
 	end;
 end;
 
-local function badAnimationDetection(player: Player, character: Model)
-	local humanoid = character:FindFirstChildOfClass("Humanoid");
-	if not humanoid then return; end;
-	local animationConnection
-	animationConnection = humanoid.AnimationPlayed:Connect(function(track)
-		local animId = track.Animation and track.Animation.AnimationId or "unknown";
-		if iHM.ssAC.pD.BAD_ANIMATION_IDS[animId] then
-			warn("[ANIMATION BAN] " .. player.Name .. " attempted to play a banned animation: " .. animId);
-			iHM.sendNotification("Why? Do you think your funny, because you are not!", player.Name);
-			iHM.sendToWebhook(player.Name .. " was kicked for using inappropriate animations!");
-			player:Kick("Inappropriate animation detected.");
-		end;
-	end);
-	character.AncestryChanged:Connect(function(_, parent)
-		if not parent then
-			animationConnection:Disconnect();
-		end;
-	end);
-end;
-
--- Here is where we will handle our AntiCheat logic
 game:GetService("Players").PlayerAdded:Connect(function(player)
-	local oS, aD = iHM.checkLevel(player);
-	if oS == "Owner" or "Admin" and aD == true then
-		if iHM.avCon.DEBUGINFO.dM then
-			print("AntiCheat is off for " .. player.Name);
-		end; 
-		return;
-	end;
-	agePrevention(player);
+	local oS, aD = iHM.checkLevel(player)
+	if (oS == "Owner" or oS == "Admin") and aD == true then return end
 	player.CharacterAdded:Connect(function(character)
-		character:WaitForChild("HumanoidRootPart");
-		character:WaitForChild("Humanoid");
-		coroutine.wrap(detectSpeedHacks)(player, character);
-		coroutine.wrap(detectJumpHacks)(player, character);
-		coroutine.wrap(detectAimBot)(player, character);
-		coroutine.wrap(badAnimationDetection)(player, character);
-	end);
-	iHM.sendNotification("The game is protected by Jupiter Development!", player.Name);
-end);
+		task.wait(1)
+		task.spawn(detectSpeedHacks, player, character)
+		task.spawn(detectJumpHacks, player, character)
+	end)
+	iHM.sendNotification("The game is protected by Jupiter Development!", player.Name)
+end)
 
 game:GetService("Players").PlayerRemoving:Connect(function(player)
-	previousAimData[player] = nil;
-end);
+	vehicleSystem.playerVehicleState[player] = nil
+end)
